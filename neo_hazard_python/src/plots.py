@@ -20,47 +20,63 @@ from src import RANDOM_STATE
 from src.data import TARGET_COLUMN
 
 CLASS_LABELS = ["Safe", "Hazardous"]
-CLASS_COLORS = {"Hazardous": "red", "Safe": "blue"}
+CLASS_COLORS = {"Hazardous": "#ef233c", "Safe": "#3a86ff"}  # red / blue
 MODEL_COLORS = {"Random Forest": "#2a9d8f", "XGBoost": "#e76f51"}
 
 
-def risk_matrix_figure(df: pd.DataFrame, max_points: int = 2000) -> go.Figure:
-    """Velocity vs miss distance scatter; size = diameter, Red = Hazardous, Blue = Safe.
+def _marker_sizes(diameter: pd.Series, d_min: float, d_max: float) -> np.ndarray:
+    """Map diameter to marker size (px) on a LOG scale with a minimum size.
 
-    Safe points are sampled down for speed, but every hazardous point is kept.
+    Diameters span 0.5 m to 7 km. A linear scale shrinks the many small (mostly
+    safe) asteroids to invisible dots, so log10 is used and sizes run from 4 to 22 px.
+    """
+    lo, hi = np.log10(d_min), np.log10(d_max)
+    scaled = (np.log10(diameter.clip(d_min, d_max)) - lo) / max(hi - lo, 1e-9)
+    return 4 + 18 * scaled.to_numpy()
+
+
+def risk_matrix_figure(df: pd.DataFrame, max_safe: int | None = None) -> go.Figure:
+    """Velocity vs miss distance scatter; size = diameter (log scale), Red = Hazardous, Blue = Safe.
+
+    Every object is plotted by default (WebGL keeps it fast). Safe points are drawn
+    first and semi-transparent so the hazardous points on top stay readable.
+    ``max_safe`` optionally samples the safe class; all hazardous points are always kept.
     """
     hazardous = df[df[TARGET_COLUMN]]
     safe = df[~df[TARGET_COLUMN]]
-    n_safe = max(min(len(safe), max_points - len(hazardous)), 0)
-    plot_df = pd.concat([safe.sample(n_safe, random_state=RANDOM_STATE), hazardous])
-    plot_df = plot_df.assign(Status=np.where(plot_df[TARGET_COLUMN], "Hazardous", "Safe"))
-    fig = px.scatter(
-        plot_df,
-        x="relative_velocity",
-        y="miss_distance",
-        size="estimated_diameter",
-        color="Status",
-        color_discrete_map=CLASS_COLORS,
-        category_orders={"Status": ["Safe", "Hazardous"]},
-        hover_data={
-            "estimated_diameter": ":.3f",
-            "relative_velocity": ":.2f",
-            "miss_distance": ":,.0f",
-            "absolute_magnitude": ":.2f",
-            "Status": True,
-        },
-        log_y=True,
-        opacity=0.6,
-        size_max=25,
-        labels={
-            "relative_velocity": "Relative velocity (km/s)",
-            "miss_distance": "Miss distance (km, log scale)",
-            "estimated_diameter": "Diameter (km)",
-            "absolute_magnitude": "Absolute magnitude (H)",
-        },
-        title="Risk Matrix: velocity vs miss distance (marker size = diameter)",
+    if max_safe is not None and len(safe) > max_safe:
+        safe = safe.sample(max_safe, random_state=RANDOM_STATE)
+    d_min, d_max = df["estimated_diameter"].min(), df["estimated_diameter"].max()
+    fig = go.Figure()
+    for label, part, opacity in [("Safe", safe, 0.35), ("Hazardous", hazardous, 0.8)]:
+        fig.add_trace(
+            go.Scattergl(
+                x=part["relative_velocity"],
+                y=part["miss_distance"],
+                mode="markers",
+                name=f"{label} ({len(part):,})",
+                marker={
+                    "color": CLASS_COLORS[label],
+                    "size": _marker_sizes(part["estimated_diameter"], d_min, d_max),
+                    "opacity": opacity,
+                    "line": {"width": 0},
+                },
+                customdata=part[["estimated_diameter", "absolute_magnitude"]].to_numpy(),
+                hovertemplate=(
+                    f"<b>{label}</b><br>Velocity: %{{x:.2f}} km/s<br>"
+                    "Miss distance: %{y:,.0f} km<br>Diameter: %{customdata[0]:.3f} km<br>"
+                    "Absolute magnitude H: %{customdata[1]:.2f}<extra></extra>"
+                ),
+            )
+        )
+    fig.update_layout(
+        title="Risk Matrix: velocity vs miss distance (marker size = diameter, log scale)",
+        xaxis_title="Relative velocity (km/s)",
+        yaxis_title="Miss distance (km, log scale)",
+        yaxis_type="log",
+        legend_title_text="Hazard status (count)",
+        height=550,
     )
-    fig.update_layout(legend_title_text="Hazard status")
     return fig
 
 

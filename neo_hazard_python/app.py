@@ -26,6 +26,9 @@ from src.preprocessing import transform_features
 
 st.set_page_config(page_title="NEO Hazard Classification", page_icon="☄️", layout="wide")
 
+# Dark text on the green highlight so it stays readable in both light and dark themes.
+BEST_CELL_STYLE = "background-color: #b7e4c7; color: #0b3d20; font-weight: bold;"
+
 IMBALANCE_OPTIONS = {"SMOTE": "smote", "Class weighting": "class_weight", "None": "none"}
 
 
@@ -143,8 +146,8 @@ with tabs[0]:
     styled = (
         comparison.style.format("{:.3f}")
         .format("{:d}", subset=["false_negatives"])
-        .highlight_max(subset=higher, color="#b7e4c7")
-        .highlight_min(subset=lower, color="#b7e4c7")
+        .highlight_max(subset=higher, props=BEST_CELL_STYLE)
+        .highlight_min(subset=lower, props=BEST_CELL_STYLE)
     )
     st.subheader("Model comparison (test set)")
     st.dataframe(styled, use_container_width=True)
@@ -165,8 +168,14 @@ with tabs[0]:
 # ---------------------------------------------------------------- risk matrix
 with tabs[1]:
     st.plotly_chart(risk_matrix_figure(trained_df), use_container_width=True)
-    st.caption("Red = Hazardous, Blue = Safe. Safe objects are sampled to ~2,000 points; "
-               "all hazardous objects are shown.")
+    n_haz = int(trained_df["is_potentially_hazardous_asteroid"].sum())
+    st.caption(
+        f"Red = Hazardous, Blue = Safe. **All {len(trained_df):,} objects are plotted** "
+        f"({len(trained_df) - n_haz:,} safe, {n_haz:,} hazardous). Marker size uses a log scale "
+        "of diameter so small asteroids stay visible. Safe asteroids are mostly small (median "
+        "~30 m) while hazardous ones are large (median ~260 m), which is why the big markers are red. "
+        "Note that distance and speed barely separate the classes: size does."
+    )
 
 # ---------------------------------------------------------------- confusion matrices
 with tabs[2]:
